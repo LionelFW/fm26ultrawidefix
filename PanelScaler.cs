@@ -143,6 +143,9 @@ public class PanelScaler : MonoBehaviour
     private static readonly HashSet<string> s_skipExact    = new HashSet<string>();
     private static readonly List<string>    s_skipPrefixes = new List<string>();
 
+    // Collects expansion actions during a cycle for the LogExpansions summary.
+    private static readonly List<string> s_expansionLog = new List<string>();
+
     private static void RefreshSkipNames()
     {
         s_skipExact.Clear();
@@ -175,6 +178,9 @@ public class PanelScaler : MonoBehaviour
         if ((float)Screen.width / Screen.height < 1.9f) return;
 
         RefreshSkipNames();
+        bool logExp = Plugin.LogExpansions.Value;
+        if (logExp) s_expansionLog.Clear();
+
         float logicalCanvasW = Screen.width / _lastHeightRatio;
         float threshold      = logicalCanvasW * 0.4f;
 
@@ -193,6 +199,9 @@ public class PanelScaler : MonoBehaviour
         {
             Plugin.Log.LogDebug($"[PanelScaler] ExpandUIDocumentRoots: {ex.Message}");
         }
+
+        if (logExp && s_expansionLog.Count > 0)
+            Plugin.Log.LogInfo("[EXP] " + string.Join(" | ", s_expansionLog));
     }
 
     // Recursively removes width/max-width constraints.
@@ -215,6 +224,9 @@ public class PanelScaler : MonoBehaviour
             ForceFullWidth(ve);
             if (depth == 0)
                 ve.style.height = new StyleLength(new Length(100f, LengthUnit.Percent));
+
+            if (Plugin.LogExpansions.Value)
+                s_expansionLog.Add($"d={depth} \"{ve.name ?? "(null)"}\" forced");
 
             // If this slot is on the skip list, expand it (it's a full-canvas layer) but
             // don't recurse — its children are self-contained UI that must keep natural sizing.
@@ -239,6 +251,9 @@ public class PanelScaler : MonoBehaviour
                     ve.style.width       = new StyleLength(new Length(100f, LengthUnit.Percent));
                     ve.style.marginLeft  = new StyleLength(new Length(0f, LengthUnit.Pixel));
                     ve.style.marginRight = new StyleLength(new Length(0f, LengthUnit.Pixel));
+
+                    if (Plugin.LogExpansions.Value)
+                        s_expansionLog.Add($"d={depth} \"{ve.name ?? "(null)"}\" w={w:F0}");
                 }
             }
         }

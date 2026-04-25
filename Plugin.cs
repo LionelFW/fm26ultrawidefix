@@ -19,6 +19,7 @@ public class Plugin : BasePlugin
     public static ConfigEntry<int> TargetHeight = null!;
     public static ConfigEntry<bool>   PatchMatchCamera = null!;
     public static ConfigEntry<bool>   DiagnosticDump = null!;
+    public static ConfigEntry<bool>   LogExpansions = null!;
     public static ConfigEntry<string> SkipExpansionElements = null!;
 
     public override void Load()
@@ -29,10 +30,11 @@ public class Plugin : BasePlugin
         TargetWidth    = Config.Bind("Resolution",  "Width",          0,     "Override width (0 = auto-detect from primary display)");
         TargetHeight   = Config.Bind("Resolution",  "Height",         0,     "Override height (0 = auto-detect from primary display)");
         PatchMatchCamera       = Config.Bind("Patches", "PatchMatchCamera", true, "Correct aspect ratio on match-engine cameras");
-        SkipExpansionElements  = Config.Bind("Patches", "SkipExpansionElements", "ModalDialog,GenericModalDialog,FigmaBaseCardTemplate*",
+        SkipExpansionElements  = Config.Bind("Patches", "SkipExpansionElements", "ModalDialog,GenericModalDialog,Card,ExternalNewsDynamicCard",
             "Comma-separated element names whose subtrees are excluded from width expansion. " +
             "Enable DiagnosticDump to find names, then add problem elements here.");
         DiagnosticDump = Config.Bind("Debug", "DiagnosticDump", false, "Log all root GameObjects and components on scene load");
+        LogExpansions  = Config.Bind("Debug", "LogExpansions",  false, "Log every element our code expands each cycle — use to identify elements being incorrectly widened");
 
         if (!Enabled.Value)
         {
