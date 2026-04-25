@@ -181,27 +181,14 @@ public class PanelScaler : MonoBehaviour
         }
         else
         {
-            // Absolutely-positioned elements sit outside normal flow; widening them to 100%
-            // causes them to overlay siblings. Skip expansion but still recurse children.
-            bool isAbsolute = false;
-            try
-            {
-                var pos = ve.style.position;
-                isAbsolute = pos.keyword == StyleKeyword.Undefined && pos.value == Position.Absolute;
-            }
-            catch { }
+            ve.style.maxWidth = StyleKeyword.None;
 
-            if (!isAbsolute)
+            float w = TryGetLayoutWidth(ve);
+            if (w >= threshold && !ParentIsRowFlex(ve))
             {
-                ve.style.maxWidth = StyleKeyword.None;
-
-                float w = TryGetLayoutWidth(ve);
-                if (w >= threshold && !ParentIsRowFlex(ve))
-                {
-                    ve.style.width       = new StyleLength(new Length(100f, LengthUnit.Percent));
-                    ve.style.marginLeft  = new StyleLength(new Length(0f, LengthUnit.Pixel));
-                    ve.style.marginRight = new StyleLength(new Length(0f, LengthUnit.Pixel));
-                }
+                ve.style.width       = new StyleLength(new Length(100f, LengthUnit.Percent));
+                ve.style.marginLeft  = new StyleLength(new Length(0f, LengthUnit.Pixel));
+                ve.style.marginRight = new StyleLength(new Length(0f, LengthUnit.Pixel));
             }
         }
 
@@ -220,21 +207,7 @@ public class PanelScaler : MonoBehaviour
             if (p == null) return false;
             return p.resolvedStyle.flexDirection == FlexDirection.Row;
         }
-        catch { }
-
-        // resolvedStyle is an interface in IL2CPP and can throw — fall back to inline style
-        // (plain struct, always safe) before giving up.
-        try
-        {
-            var p = ve.parent;
-            if (p == null) return false;
-            var fd = p.style.flexDirection;
-            if (fd.keyword == StyleKeyword.Undefined)
-                return fd.value == FlexDirection.Row;
-        }
-        catch { }
-
-        return false;
+        catch { return false; }
     }
 
     // Returns the element's layout width in logical pixels, using multiple fallback
