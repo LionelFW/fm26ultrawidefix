@@ -328,8 +328,8 @@ public class PanelScaler : MonoBehaviour
 
         string indent = new string(' ', depth * 2);
         float rw = -1f, lw = -1f;
-        try { rw = ve.resolvedStyle.width; }  catch { }
-        try { lw = ve.layout.width; }         catch { }
+        try { rw = ve.resolvedStyle.width; } catch { }
+        try { lw = ve.layout.width; }        catch { }
 
         var inlineW = "(none)";
         try
@@ -341,8 +341,25 @@ public class PanelScaler : MonoBehaviour
         }
         catch { }
 
+        // Concrete type — distinguishes Label, Button, TemplateContainer, etc.
+        var typeName = "?";
+        try { typeName = ve.GetType().Name; } catch { }
+
+        // Text content — lets you search the log for words visible on screen.
+        var textSnippet = "";
+        try
+        {
+            if (ve is TextElement te && !string.IsNullOrEmpty(te.text))
+            {
+                var t = te.text.Replace('\n', ' ').Trim();
+                if (t.Length > 0)
+                    textSnippet = $" \"{(t.Length > 60 ? t.Substring(0, 60) + "…" : t)}\"";
+            }
+        }
+        catch { }
+
         Plugin.Log.LogInfo(
-            $"{indent}[{depth}] name={ve.name ?? "(null)"} " +
+            $"{indent}[{depth}] name={ve.name ?? "(null)"} ({typeName}){textSnippet} " +
             $"children={ve.childCount} " +
             $"resolved={rw:F0} layout={lw:F0} inline={inlineW}");
 
