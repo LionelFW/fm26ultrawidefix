@@ -53,13 +53,16 @@ dotnet build -c Release -p:GameDir="/path/to/Football Manager 26"
 
 The output DLL will be at `bin/Release/net6.0/FM26UltrawideFix.dll`.
 
+## Bugs and issues
+Feel free to report bugs and issues in the Issues section here on github. You can also contact me through Discord (Wobs OR with userId :  103905189341167616).
+
 ## Contributing
 
 Bug reports and pull requests are welcome. A few things worth knowing before diving in:
 
 The UI system is not standard Unity. FM26 uses Unity UI Toolkit (`PanelSettings`, `VisualElement`, `UIDocument`), not uGUI/Canvas. Fixes that work for other Unity games via `CanvasScaler` don't apply here. If you're researching a layout issue, the `DiagnosticDump` config option will log the full `VisualElement` hierarchy on each scene load, which is the most useful starting point.
 
-The game compiles to native code, so many things that work in Mono builds behave differently here. `resolvedStyle` properties (interface dispatch) can throw silently in IL2CPP; `ve.layout` (a plain Rect struct) is reliable. `RuntimeHelpers.GetHashCode` does not give stable object identity for IL2CPP proxy objects — use `ve.Pointer.ToInt64()` as a dictionary key instead.
+The game compiles to native code, so many things that work in Mono builds behave differently here. `resolvedStyle` properties (interface dispatch) can throw silently in IL2CPP; `ve.layout` (a plain Rect struct) is reliable. `RuntimeHelpers.GetHashCode` does not give stable object identity for IL2CPP proxy objects, use `ve.Pointer.ToInt64()` as a dictionary key instead.
 
 The fix runs on a polling loop. FM26 resets various style properties on scene transitions. The mod re-applies its changes every 30 frames rather than relying on one-shot hooks that the game can undo. I have not profiled the performance impact, but it feels ok for now.
 
