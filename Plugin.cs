@@ -29,7 +29,7 @@ public class Plugin : BasePlugin
         TargetWidth    = Config.Bind("Resolution",  "Width",          0,     "Override width (0 = auto-detect from primary display)");
         TargetHeight   = Config.Bind("Resolution",  "Height",         0,     "Override height (0 = auto-detect from primary display)");
         PatchMatchCamera       = Config.Bind("Patches", "PatchMatchCamera", true, "Correct aspect ratio on match-engine cameras");
-        SkipExpansionElements  = Config.Bind("Patches", "SkipExpansionElements", "ModalDialog,GenericModalDialog",
+        SkipExpansionElements  = Config.Bind("Patches", "SkipExpansionElements", "ModalDialog,GenericModalDialog,FigmaBaseCardTemplate*",
             "Comma-separated element names whose subtrees are excluded from width expansion. " +
             "Enable DiagnosticDump to find names, then add problem elements here.");
         DiagnosticDump = Config.Bind("Debug", "DiagnosticDump", false, "Log all root GameObjects and components on scene load");

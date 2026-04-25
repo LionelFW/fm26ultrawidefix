@@ -138,18 +138,34 @@ public class PanelScaler : MonoBehaviour
         settings.scale     = heightRatio;
     }
 
-    // Element names whose subtrees should not be expanded — populated from config each cycle.
-    private static readonly HashSet<string> s_skipNames = new HashSet<string>();
+    // Exact names and prefix patterns (trailing *) whose subtrees skip expansion.
+    // Populated from config each cycle — no rebuild needed to add entries.
+    private static readonly HashSet<string> s_skipExact    = new HashSet<string>();
+    private static readonly List<string>    s_skipPrefixes = new List<string>();
 
     private static void RefreshSkipNames()
     {
-        s_skipNames.Clear();
+        s_skipExact.Clear();
+        s_skipPrefixes.Clear();
         var raw = Plugin.SkipExpansionElements?.Value ?? "";
         foreach (var part in raw.Split(','))
         {
             var n = part.Trim();
-            if (n.Length > 0) s_skipNames.Add(n);
+            if (n.Length == 0) continue;
+            if (n.EndsWith("*"))
+                s_skipPrefixes.Add(n.Substring(0, n.Length - 1));
+            else
+                s_skipExact.Add(n);
         }
+    }
+
+    private static bool IsSkipped(string name)
+    {
+        if (name == null) return false;
+        if (s_skipExact.Contains(name)) return true;
+        foreach (var prefix in s_skipPrefixes)
+            if (name.StartsWith(prefix, StringComparison.Ordinal)) return true;
+        return false;
     }
 
     // Expands container elements to fill the extra horizontal logical space.
@@ -202,14 +218,14 @@ public class PanelScaler : MonoBehaviour
 
             // If this slot is on the skip list, expand it (it's a full-canvas layer) but
             // don't recurse — its children are self-contained UI that must keep natural sizing.
-            if (ve.name != null && s_skipNames.Contains(ve.name))
+            if (ve.name != null && IsSkipped(ve.name))
                 childrenSkip = true;
         }
         else
         {
             // A named element deeper in the tree can also be on the skip list —
             // leave it and its subtree untouched.
-            if (ve.name != null && s_skipNames.Contains(ve.name))
+            if (ve.name != null && IsSkipped(ve.name))
             {
                 childrenSkip = true;
             }
@@ -328,8 +344,8 @@ public class PanelScaler : MonoBehaviour
 
         string indent = new string(' ', depth * 2);
         float rw = -1f, lw = -1f;
-        try { rw = ve.resolvedStyle.width; } catch { }
-        try { lw = ve.layout.width; }        catch { }
+        try { rw = ve.resolvedStyle.width; }  catch { }
+        try { lw = ve.layout.width; }         catch { }
 
         var inlineW = "(none)";
         try
@@ -341,25 +357,8 @@ public class PanelScaler : MonoBehaviour
         }
         catch { }
 
-        // Concrete type — distinguishes Label, Button, TemplateContainer, etc.
-        var typeName = "?";
-        try { typeName = ve.GetType().Name; } catch { }
-
-        // Text content — lets you search the log for words visible on screen.
-        var textSnippet = "";
-        try
-        {
-            if (ve is TextElement te && !string.IsNullOrEmpty(te.text))
-            {
-                var t = te.text.Replace('\n', ' ').Trim();
-                if (t.Length > 0)
-                    textSnippet = $" \"{(t.Length > 60 ? t.Substring(0, 60) + "…" : t)}\"";
-            }
-        }
-        catch { }
-
         Plugin.Log.LogInfo(
-            $"{indent}[{depth}] name={ve.name ?? "(null)"} ({typeName}){textSnippet} " +
+            $"{indent}[{depth}] name={ve.name ?? "(null)"} " +
             $"children={ve.childCount} " +
             $"resolved={rw:F0} layout={lw:F0} inline={inlineW}");
 
