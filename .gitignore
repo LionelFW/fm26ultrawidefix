@@ -1,0 +1,10 @@
+bin/
+obj/
+.vs/
+.idea/
+*.user
+*.suo
+*.nupkg
+.DS_Store
+Thumbs.db
+CLAUDE.md
