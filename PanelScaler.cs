@@ -134,28 +134,18 @@ public class PanelScaler : MonoBehaviour
         float heightRatio = screenH / refRes.y;
         _lastHeightRatio  = heightRatio;
 
-        // C: ScaleWithScreenSize + height-only match lets Unity compute scale automatically
-        // (scale = screenH / referenceResolution.y = heightRatio). The panel canvas is
-        // screenW/heightRatio × refRes.y logical pixels — correct for any ultrawide ratio.
-        settings.scaleMode       = PanelScaleMode.ScaleWithScreenSize;
-        settings.screenMatchMode = PanelScreenMatchMode.MatchWidthOrHeight;
-        settings.match           = 1f;
+        settings.scaleMode = PanelScaleMode.ConstantPixelSize;
+        settings.scale     = heightRatio;
     }
 
-    // Named PanelManager slots that are full-canvas-width layout containers.
-    // ModalDialog, Tooltip, and Card are intentionally absent — they are floating
-    // elements that must keep their intrinsic sizes.
-    private static readonly string[] s_fullWidthSlots =
-    {
-        "Background", "Menu", "Report", "Ribbon",
-        "Overlay", "LoadingScreen", "Watermark", "Version"
-    };
-
-    // A: Expand only the known full-width named slots in each UIDocument.
-    // Runs every ~0.5 s so styles survive scene transitions.
+    // Expands container elements to fill the extra horizontal logical space.
+    // Runs every ~0.5 s so it re-applies after scene transitions reset styles.
     private static void ExpandUIDocumentRoots()
     {
         if ((float)Screen.width / Screen.height < 1.9f) return;
+
+        float logicalCanvasW = Screen.width / _lastHeightRatio;
+        float threshold      = logicalCanvasW * 0.4f;
 
         try
         {
@@ -165,19 +155,7 @@ public class PanelScaler : MonoBehaviour
                 if (doc == null) continue;
                 var root = doc.rootVisualElement;
                 if (root == null) continue;
-
-                ForceFullWidth(root);
-                root.style.height = new StyleLength(new Length(100f, LengthUnit.Percent));
-
-                foreach (var slotName in s_fullWidthSlots)
-                {
-                    var slot = root.Q(slotName, (string)null);
-                    if (slot == null) continue;
-                    ForceFullWidth(slot);
-                    slot.style.height = new StyleLength(new Length(100f, LengthUnit.Percent));
-                    for (int i = 0; i < slot.childCount; i++)
-                        ExpandWithinSlot(slot[i], slot, 0);
-                }
+                ExpandElement(root, 0, threshold);
             }
         }
         catch (Exception ex)
@@ -186,27 +164,50 @@ public class PanelScaler : MonoBehaviour
         }
     }
 
-    // Recursively expands layout containers within a known full-width slot.
-    // Only expands elements spanning ≥ 80 % of their parent — page/section wrappers.
-    // Narrow flex children (tabs, cards, buttons) are left at their natural size.
-    private static void ExpandWithinSlot(VisualElement ve, VisualElement parent, int depth)
+    // Recursively removes width/max-width constraints.
+    //   depth 0-1 → always force full width (root and immediate page wrappers)
+    //   depth 2+  → expand when layout width ≥ threshold, but only when the parent
+    //               is NOT a row flex container (expanding a row flex child squeezes siblings).
+    //               Margins are cleared only on elements that are actually expanded.
+    private static void ExpandElement(VisualElement ve, int depth, float threshold)
     {
-        if (ve == null || depth > 20) return;
+        if (ve == null || depth > 25) return;
 
-        ve.style.maxWidth = StyleKeyword.None;
-
-        float myW     = TryGetLayoutWidth(ve);
-        float parentW = TryGetLayoutWidth(parent);
-
-        if (myW > 0f && parentW > 0f && myW >= parentW * 0.8f)
+        if (depth <= 1)
         {
-            ve.style.width       = new StyleLength(new Length(100f, LengthUnit.Percent));
-            ve.style.marginLeft  = new StyleLength(new Length(0f, LengthUnit.Pixel));
-            ve.style.marginRight = new StyleLength(new Length(0f, LengthUnit.Pixel));
+            ForceFullWidth(ve);
+            if (depth == 0)
+                ve.style.height = new StyleLength(new Length(100f, LengthUnit.Percent));
+        }
+        else
+        {
+            ve.style.maxWidth = StyleKeyword.None;
+
+            float w = TryGetLayoutWidth(ve);
+            if (w >= threshold && !ParentIsRowFlex(ve))
+            {
+                ve.style.width       = new StyleLength(new Length(100f, LengthUnit.Percent));
+                ve.style.marginLeft  = new StyleLength(new Length(0f, LengthUnit.Pixel));
+                ve.style.marginRight = new StyleLength(new Length(0f, LengthUnit.Pixel));
+            }
         }
 
         for (int i = 0; i < ve.childCount; i++)
-            ExpandWithinSlot(ve[i], ve, depth + 1);
+            ExpandElement(ve[i], depth + 1, threshold);
+    }
+
+    // Returns true when the element's parent lays out children horizontally.
+    // Expanding a child in a row flex container squeezes its siblings, causing
+    // popup panels to become unreadably narrow.
+    private static bool ParentIsRowFlex(VisualElement ve)
+    {
+        try
+        {
+            var p = ve.parent;
+            if (p == null) return false;
+            return p.resolvedStyle.flexDirection == FlexDirection.Row;
+        }
+        catch { return false; }
     }
 
     // Returns the element's layout width in logical pixels, using multiple fallback
