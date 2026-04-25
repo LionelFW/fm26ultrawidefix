@@ -114,7 +114,8 @@ public class PanelScaler : MonoBehaviour
     // ------------------------------------------------------------------
 
     // Tracks the last height ratio applied so ExpandUIDocumentRoots can compute thresholds.
-    private static float _lastHeightRatio = 1f;
+    private static float _lastHeightRatio  = 1f;
+    private static float _lastRefResWidth  = 0f;
 
     internal static void ApplyScaling(PanelSettings settings)
     {
@@ -133,6 +134,7 @@ public class PanelScaler : MonoBehaviour
 
         float heightRatio = screenH / refRes.y;
         _lastHeightRatio  = heightRatio;
+        _lastRefResWidth  = refRes.x;
 
         settings.scaleMode = PanelScaleMode.ConstantPixelSize;
         settings.scale     = heightRatio;
@@ -143,8 +145,15 @@ public class PanelScaler : MonoBehaviour
     private static readonly HashSet<string> s_skipExact    = new HashSet<string>();
     private static readonly List<string>    s_skipPrefixes = new List<string>();
 
-    // Collects expansion actions during a cycle for the LogExpansions summary.
+    // Collects expansion/skip actions during a cycle for the log summaries.
     private static readonly List<string> s_expansionLog = new List<string>();
+    private static readonly List<string> s_skipLog      = new List<string>();
+
+    // Remembers the original (16:9) pixel widths and left positions set by game code for grid tiles.
+    // Keyed by native IL2CPP pointer (stable under Boehm GC) so cycles always scale from the
+    // game's original 16:9 baseline rather than compounding previous corrections.
+    private static readonly Dictionary<long, float> s_tileOriginalWidths = new Dictionary<long, float>();
+    private static readonly Dictionary<long, float> s_tileOriginalLefts  = new Dictionary<long, float>();
 
     private static void RefreshSkipNames()
     {
@@ -178,15 +187,18 @@ public class PanelScaler : MonoBehaviour
         if ((float)Screen.width / Screen.height < 1.9f) return;
 
         RefreshSkipNames();
-        bool logExp = Plugin.LogExpansions.Value;
-        if (logExp) s_expansionLog.Clear();
+        bool logExp  = Plugin.LogExpansions.Value;
+        bool logSkip = Plugin.LogSkipped.Value;
+        if (logExp)  s_expansionLog.Clear();
+        if (logSkip) s_skipLog.Clear();
 
         float logicalCanvasW = Screen.width / _lastHeightRatio;
         float threshold      = logicalCanvasW * 0.4f;
 
+        UIDocument[] docs = null;
         try
         {
-            var docs = GameObject.FindObjectsOfType<UIDocument>();
+            docs = GameObject.FindObjectsOfType<UIDocument>();
             foreach (var doc in docs)
             {
                 if (doc == null) continue;
@@ -200,8 +212,30 @@ public class PanelScaler : MonoBehaviour
             Plugin.Log.LogDebug($"[PanelScaler] ExpandUIDocumentRoots: {ex.Message}");
         }
 
-        if (logExp && s_expansionLog.Count > 0)
-            Plugin.Log.LogInfo("[EXP] " + string.Join(" | ", s_expansionLog));
+        // Phase 2 — grid tile scaling runs AFTER the expansion pass so that any maxWidth
+        // caps we set here cannot be cleared by a subsequent ExpandElement traversal.
+        if (docs != null)
+        {
+            try
+            {
+                foreach (var doc in docs)
+                {
+                    if (doc == null) continue;
+                    var root = doc.rootVisualElement;
+                    if (root == null) continue;
+                    ScanForGridLayouts(root, 0);
+                }
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogDebug($"[PanelScaler] ScanForGridLayouts: {ex.Message}");
+            }
+        }
+
+        if (logExp  && s_expansionLog.Count > 0)
+            Plugin.Log.LogInfo("[EXP]  " + string.Join(" | ", s_expansionLog));
+        if (logSkip && s_skipLog.Count > 0)
+            Plugin.Log.LogInfo("[SKIP] " + string.Join(" | ", s_skipLog));
     }
 
     // Recursively removes width/max-width constraints.
@@ -211,7 +245,7 @@ public class PanelScaler : MonoBehaviour
     //               Margins are cleared only on elements that are actually expanded.
     private static void ExpandElement(VisualElement ve, int depth, float threshold, bool skipExpansion = false)
     {
-        if (ve == null || depth > 25) return;
+        if (ve == null || depth > 100) return;
 
         bool childrenSkip = skipExpansion;
 
@@ -228,26 +262,29 @@ public class PanelScaler : MonoBehaviour
             if (Plugin.LogExpansions.Value)
                 s_expansionLog.Add($"d={depth} \"{ve.name ?? "(null)"}\" forced");
 
-            // If this slot is on the skip list, expand it (it's a full-canvas layer) but
-            // don't recurse — its children are self-contained UI that must keep natural sizing.
             if (ve.name != null && IsSkipped(ve.name))
+            {
                 childrenSkip = true;
+                if (Plugin.LogSkipped.Value)
+                    s_skipLog.Add($"d={depth} \"{ve.name}\" skip-list[no-recurse]");
+            }
         }
         else
         {
-            // A named element deeper in the tree can also be on the skip list —
-            // leave it and its subtree untouched.
             if (ve.name != null && IsSkipped(ve.name))
             {
                 childrenSkip = true;
+                if (Plugin.LogSkipped.Value && depth <= 8)
+                    s_skipLog.Add($"d={depth} \"{ve.name}\" skip-list");
             }
             else
             {
-                ve.style.maxWidth = StyleKeyword.None;
+                float w     = TryGetLayoutWidth(ve);
+                bool  isRow = ParentIsRowFlex(ve);
 
-                float w = TryGetLayoutWidth(ve);
-                if (w >= threshold && !ParentIsRowFlex(ve))
+                if (w >= threshold && !isRow)
                 {
+                    ve.style.maxWidth    = StyleKeyword.None;
                     ve.style.width       = new StyleLength(new Length(100f, LengthUnit.Percent));
                     ve.style.marginLeft  = new StyleLength(new Length(0f, LengthUnit.Pixel));
                     ve.style.marginRight = new StyleLength(new Length(0f, LengthUnit.Pixel));
@@ -255,11 +292,104 @@ public class PanelScaler : MonoBehaviour
                     if (Plugin.LogExpansions.Value)
                         s_expansionLog.Add($"d={depth} \"{ve.name ?? "(null)"}\" w={w:F0}");
                 }
+                else if (Plugin.LogSkipped.Value && depth <= 8 && !string.IsNullOrEmpty(ve.name))
+                {
+                    string reason = w < 0f  ? "w=unknown"
+                                  : isRow   ? $"row-flex w={w:F0}"
+                                  :           $"w={w:F0}<thr={threshold:F0}";
+                    s_skipLog.Add($"d={depth} \"{ve.name}\" {reason}");
+                }
             }
         }
 
         for (int i = 0; i < ve.childCount; i++)
             ExpandElement(ve[i], depth + 1, threshold, childrenSkip);
+    }
+
+    private static void ScanForGridLayouts(VisualElement ve, int depth)
+    {
+        if (ve == null || depth > 35) return;
+        if (ve.name == "GridLayoutElementContent")
+            ScaleGridTiles(ve);
+        for (int i = 0; i < ve.childCount; i++)
+            ScanForGridLayouts(ve[i], depth + 1);
+    }
+
+    // Scales the inline pixel-width children of a GridLayoutElementContent container
+    // to fill the extra horizontal space created by ultrawide scaling.
+    // Uses s_tileOriginalWidths so that re-running each cycle always scales from the
+    // game's original 16:9 value rather than compounding previous corrections.
+    private static void ScaleGridTiles(VisualElement container)
+    {
+        if (_lastRefResWidth <= 0f || _lastHeightRatio <= 0f) return;
+
+        float logicalCanvasW = Screen.width / _lastHeightRatio;
+        float ratio          = logicalCanvasW / _lastRefResWidth;
+        if (ratio < 1.05f) return;
+
+        // First pass: detect whether this is a mixed layout — pixel-width overlay widgets
+        // alongside a percent-width background element (e.g. info panels over a fixture list).
+        VisualElement percentChild  = null;
+        float         maxPixelWidth = 0f;
+        for (int i = 0; i < container.childCount; i++)
+        {
+            var c = container[i];
+            if (c == null) continue;
+            try
+            {
+                var ws = c.style.width;
+                if (ws.keyword == StyleKeyword.Undefined)
+                {
+                    if (ws.value.unit == LengthUnit.Percent && percentChild == null)
+                        percentChild = c;
+                    else if (ws.value.unit == LengthUnit.Pixel && ws.value.value > maxPixelWidth)
+                        maxPixelWidth = ws.value.value;
+                }
+            }
+            catch { }
+        }
+
+        // Mixed layout: pixel children are likely inactive tab views or overlay cards,
+        // not scalable grid tiles. Leave the whole container untouched.
+        if (percentChild != null)
+            return;
+
+        // Pure pixel-width grid (dashboard tiles) — scale all children.
+        for (int i = 0; i < container.childCount; i++)
+        {
+            var child = container[i];
+            if (child == null) continue;
+            try
+            {
+                long key = child.Pointer.ToInt64();
+
+                // Scale inline pixel width.
+                var ws = child.style.width;
+                if (ws.keyword == StyleKeyword.Undefined
+                    && ws.value.unit == LengthUnit.Pixel
+                    && ws.value.value > 0f)
+                {
+                    float baseW = s_tileOriginalWidths.TryGetValue(key, out float sw) ? sw : ws.value.value;
+                    if (!s_tileOriginalWidths.ContainsKey(key)) s_tileOriginalWidths[key] = ws.value.value;
+                    child.style.width = new StyleLength(new Length(baseW * ratio, LengthUnit.Pixel));
+                    Plugin.Log.LogDebug(
+                        $"[GridTile] '{child.name ?? "(null)"}' w={baseW:F0}→{baseW * ratio:F0} (×{ratio:F3})");
+                }
+
+                // Scale inline pixel left position so absolutely-positioned tiles don't overlap.
+                // Tiles that are flex-flow children won't have an explicit left > 0, so this is a no-op for them.
+                var ls = child.style.left;
+                if (ls.keyword == StyleKeyword.Undefined
+                    && ls.value.unit == LengthUnit.Pixel
+                    && ls.value.value > 0f)
+                {
+                    float baseL = s_tileOriginalLefts.TryGetValue(key, out float sl) ? sl : ls.value.value;
+                    if (!s_tileOriginalLefts.ContainsKey(key)) s_tileOriginalLefts[key] = ls.value.value;
+                    child.style.left = new StyleLength(new Length(baseL * ratio, LengthUnit.Pixel));
+                }
+            }
+            catch { }
+        }
     }
 
     // Returns true when the element's parent lays out children horizontally.
@@ -273,7 +403,21 @@ public class PanelScaler : MonoBehaviour
             if (p == null) return false;
             return p.resolvedStyle.flexDirection == FlexDirection.Row;
         }
-        catch { return false; }
+        catch { }
+
+        // resolvedStyle is an interface and throws silently in IL2CPP.
+        // Fall back to the inline style, which is a plain struct and safe to read.
+        try
+        {
+            var p = ve.parent;
+            if (p == null) return false;
+            var fd = p.style.flexDirection;
+            if (fd.keyword == StyleKeyword.Undefined)
+                return fd.value == FlexDirection.Row;
+        }
+        catch { }
+
+        return false;
     }
 
     // Returns the element's layout width in logical pixels, using multiple fallback
@@ -343,7 +487,7 @@ public class PanelScaler : MonoBehaviour
                 Plugin.Log.LogInfo($"  [UIDocument] GO={doc.gameObject.name}");
                 var root = doc.rootVisualElement;
                 if (root != null)
-                    DumpVE(root, 0, maxDepth: 15);
+                    DumpVE(root, 0, maxDepth: 25);
             }
         }
         catch (Exception ex)

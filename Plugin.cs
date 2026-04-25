@@ -20,6 +20,7 @@ public class Plugin : BasePlugin
     public static ConfigEntry<bool>   PatchMatchCamera = null!;
     public static ConfigEntry<bool>   DiagnosticDump = null!;
     public static ConfigEntry<bool>   LogExpansions = null!;
+    public static ConfigEntry<bool>   LogSkipped    = null!;
     public static ConfigEntry<string> SkipExpansionElements = null!;
 
     public override void Load()
@@ -35,6 +36,7 @@ public class Plugin : BasePlugin
             "Enable DiagnosticDump to find names, then add problem elements here.");
         DiagnosticDump = Config.Bind("Debug", "DiagnosticDump", false, "Log all root GameObjects and components on scene load");
         LogExpansions  = Config.Bind("Debug", "LogExpansions",  false, "Log every element our code expands each cycle — use to identify elements being incorrectly widened");
+        LogSkipped     = Config.Bind("Debug", "LogSkipped",     false, "Log named elements that were NOT expanded and why (skip-list / unreadable / below-threshold / row-flex)");
 
         if (!Enabled.Value)
         {
