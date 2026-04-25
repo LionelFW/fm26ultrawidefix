@@ -40,7 +40,7 @@ Linux :
 You need the .NET 6 SDK and a copy of FM26 with BepInEx already set up (so the interop assemblies exist).
 
 ```bash
-git clone https://github.com/your-username/fm26ultrawidefix
+git clone https://github.com/LionelFW/fm26ultrawidefix.git
 cd fm26ultrawidefix
 dotnet build -c Release
 ```
