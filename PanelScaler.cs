@@ -181,14 +181,29 @@ public class PanelScaler : MonoBehaviour
         }
         else
         {
-            ve.style.maxWidth = StyleKeyword.None;
-
-            float w = TryGetLayoutWidth(ve);
-            if (w >= threshold && !ParentIsRowFlex(ve))
+            // Absolutely-positioned elements are outside normal flow; expanding them
+            // to 100% width causes them to overlay siblings. Skip the expansion but
+            // still recurse so normal-flow children inside them are handled.
+            bool isAbsolute = false;
+            try
             {
-                ve.style.width       = new StyleLength(new Length(100f, LengthUnit.Percent));
-                ve.style.marginLeft  = new StyleLength(new Length(0f, LengthUnit.Pixel));
-                ve.style.marginRight = new StyleLength(new Length(0f, LengthUnit.Pixel));
+                var pos = ve.style.position;
+                isAbsolute = pos.keyword == StyleKeyword.Undefined && pos.value == Position.Absolute;
+            }
+            catch { }
+
+            if (!isAbsolute)
+            {
+                bool hadMaxWidth = TryGetHadMaxWidth(ve);
+                ve.style.maxWidth = StyleKeyword.None;
+
+                float w = TryGetLayoutWidth(ve);
+                if ((w >= threshold || (hadMaxWidth && w < 0f)) && !ParentIsRowFlex(ve))
+                {
+                    ve.style.width       = new StyleLength(new Length(100f, LengthUnit.Percent));
+                    ve.style.marginLeft  = new StyleLength(new Length(0f, LengthUnit.Pixel));
+                    ve.style.marginRight = new StyleLength(new Length(0f, LengthUnit.Pixel));
+                }
             }
         }
 
@@ -199,6 +214,8 @@ public class PanelScaler : MonoBehaviour
     // Returns true when the element's parent lays out children horizontally.
     // Expanding a child in a row flex container squeezes its siblings, causing
     // popup panels to become unreadably narrow.
+    // resolvedStyle is an interface in IL2CPP and can throw — fall back to the
+    // inline style struct (plain value, always safe) before giving up.
     private static bool ParentIsRowFlex(VisualElement ve)
     {
         try
@@ -207,7 +224,43 @@ public class PanelScaler : MonoBehaviour
             if (p == null) return false;
             return p.resolvedStyle.flexDirection == FlexDirection.Row;
         }
-        catch { return false; }
+        catch { }
+
+        try
+        {
+            var p = ve.parent;
+            if (p == null) return false;
+            var fd = p.style.flexDirection;
+            if (fd.keyword == StyleKeyword.Undefined)
+                return fd.value == FlexDirection.Row;
+        }
+        catch { }
+
+        return false;
+    }
+
+    // Returns true if the element has an explicit pixel max-width set (inline or USS).
+    // Used as a secondary expansion signal when TryGetLayoutWidth returns -1 (layout
+    // not yet settled or width defined purely via USS).
+    private static bool TryGetHadMaxWidth(VisualElement ve)
+    {
+        try
+        {
+            float rmw = ve.resolvedStyle.maxWidth.value;
+            if (!float.IsNaN(rmw) && rmw > 0f) return true;
+        }
+        catch { }
+
+        try
+        {
+            var mw = ve.style.maxWidth;
+            if (mw.keyword == StyleKeyword.Undefined
+                && mw.value.unit == LengthUnit.Pixel
+                && mw.value.value > 0f) return true;
+        }
+        catch { }
+
+        return false;
     }
 
     // Returns the element's layout width in logical pixels, using multiple fallback
