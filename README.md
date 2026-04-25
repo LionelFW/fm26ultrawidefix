@@ -8,7 +8,7 @@ There are still a few quirks with the way the mod scales UI elements, and is by 
 ## Requirements
 
 - Football Manager 2026
-- BepInEx 6 #738 at a minimum. This is mandatory, BepInEx LTS versions such as BepInEx 5 are not supported.
+- BepInEx 6 #738 at a minimum. You can download the FM26 specific version on [Thunderstore](https://new.thunderstore.io/c/football-manager-26/p/BepInEx/BepInExPack_FootballManager26/). This is mandatory, BepInEx LTS versions such as BepInEx 5 are not supported. 
 
 ## Installation
 
