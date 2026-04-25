@@ -17,8 +17,9 @@ public class Plugin : BasePlugin
     public static ConfigEntry<bool> Enabled = null!;
     public static ConfigEntry<int> TargetWidth = null!;
     public static ConfigEntry<int> TargetHeight = null!;
-    public static ConfigEntry<bool> PatchMatchCamera = null!;
-    public static ConfigEntry<bool> DiagnosticDump = null!;
+    public static ConfigEntry<bool>   PatchMatchCamera = null!;
+    public static ConfigEntry<bool>   DiagnosticDump = null!;
+    public static ConfigEntry<string> SkipExpansionElements = null!;
 
     public override void Load()
     {
@@ -27,8 +28,11 @@ public class Plugin : BasePlugin
         Enabled        = Config.Bind("General",    "Enabled",        true,  "Enable ultrawide fix");
         TargetWidth    = Config.Bind("Resolution",  "Width",          0,     "Override width (0 = auto-detect from primary display)");
         TargetHeight   = Config.Bind("Resolution",  "Height",         0,     "Override height (0 = auto-detect from primary display)");
-        PatchMatchCamera = Config.Bind("Patches",   "PatchMatchCamera", true, "Correct aspect ratio on match-engine cameras");
-        DiagnosticDump = Config.Bind("Debug",       "DiagnosticDump", false, "Log all root GameObjects and components on scene load");
+        PatchMatchCamera       = Config.Bind("Patches", "PatchMatchCamera", true, "Correct aspect ratio on match-engine cameras");
+        SkipExpansionElements  = Config.Bind("Patches", "SkipExpansionElements", "ModalDialog,GenericModalDialog",
+            "Comma-separated element names whose subtrees are excluded from width expansion. " +
+            "Enable DiagnosticDump to find names, then add problem elements here.");
+        DiagnosticDump = Config.Bind("Debug", "DiagnosticDump", false, "Log all root GameObjects and components on scene load");
 
         if (!Enabled.Value)
         {

@@ -138,12 +138,27 @@ public class PanelScaler : MonoBehaviour
         settings.scale     = heightRatio;
     }
 
+    // Element names whose subtrees should not be expanded — populated from config each cycle.
+    private static readonly HashSet<string> s_skipNames = new HashSet<string>();
+
+    private static void RefreshSkipNames()
+    {
+        s_skipNames.Clear();
+        var raw = Plugin.SkipExpansionElements?.Value ?? "";
+        foreach (var part in raw.Split(','))
+        {
+            var n = part.Trim();
+            if (n.Length > 0) s_skipNames.Add(n);
+        }
+    }
+
     // Expands container elements to fill the extra horizontal logical space.
     // Runs every ~0.5 s so it re-applies after scene transitions reset styles.
     private static void ExpandUIDocumentRoots()
     {
         if ((float)Screen.width / Screen.height < 1.9f) return;
 
+        RefreshSkipNames();
         float logicalCanvasW = Screen.width / _lastHeightRatio;
         float threshold      = logicalCanvasW * 0.4f;
 
@@ -185,22 +200,30 @@ public class PanelScaler : MonoBehaviour
             if (depth == 0)
                 ve.style.height = new StyleLength(new Length(100f, LengthUnit.Percent));
 
-            // ModalDialog/GenericModalDialog are full-canvas overlay layers whose
-            // children are the actual dialog box — centered, fixed-width, must not
-            // be expanded. Force the slot to full width but stop here.
-            if (ve.name == "ModalDialog" || ve.name == "GenericModalDialog")
+            // If this slot is on the skip list, expand it (it's a full-canvas layer) but
+            // don't recurse — its children are self-contained UI that must keep natural sizing.
+            if (ve.name != null && s_skipNames.Contains(ve.name))
                 childrenSkip = true;
         }
         else
         {
-            ve.style.maxWidth = StyleKeyword.None;
-
-            float w = TryGetLayoutWidth(ve);
-            if (w >= threshold && !ParentIsRowFlex(ve))
+            // A named element deeper in the tree can also be on the skip list —
+            // leave it and its subtree untouched.
+            if (ve.name != null && s_skipNames.Contains(ve.name))
             {
-                ve.style.width       = new StyleLength(new Length(100f, LengthUnit.Percent));
-                ve.style.marginLeft  = new StyleLength(new Length(0f, LengthUnit.Pixel));
-                ve.style.marginRight = new StyleLength(new Length(0f, LengthUnit.Pixel));
+                childrenSkip = true;
+            }
+            else
+            {
+                ve.style.maxWidth = StyleKeyword.None;
+
+                float w = TryGetLayoutWidth(ve);
+                if (w >= threshold && !ParentIsRowFlex(ve))
+                {
+                    ve.style.width       = new StyleLength(new Length(100f, LengthUnit.Percent));
+                    ve.style.marginLeft  = new StyleLength(new Length(0f, LengthUnit.Pixel));
+                    ve.style.marginRight = new StyleLength(new Length(0f, LengthUnit.Pixel));
+                }
             }
         }
 
