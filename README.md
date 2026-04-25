@@ -4,6 +4,7 @@ A BepInEx plugin that adds proper ultrawide support to Football Manager 2026. Th
 
 This mod patches the game's UI scaling pipeline at runtime to fill the full width of your monitor without stretching or distorting anything.
 
+There are still a few quirks with the way the mod scales UI elements, and is by no means perfect. Some main menu elements are a bit cropped, some elements feel offset... This mod has been tested on a UWQHD monitor, so feel free to mention any and all issues with other resolutions. 
 ## Requirements
 
 - Football Manager 2026
