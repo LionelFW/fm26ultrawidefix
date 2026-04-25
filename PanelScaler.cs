@@ -169,15 +169,27 @@ public class PanelScaler : MonoBehaviour
     //   depth 2+  → expand when layout width ≥ threshold, but only when the parent
     //               is NOT a row flex container (expanding a row flex child squeezes siblings).
     //               Margins are cleared only on elements that are actually expanded.
-    private static void ExpandElement(VisualElement ve, int depth, float threshold)
+    private static void ExpandElement(VisualElement ve, int depth, float threshold, bool skipExpansion = false)
     {
         if (ve == null || depth > 25) return;
 
-        if (depth <= 1)
+        bool childrenSkip = skipExpansion;
+
+        if (skipExpansion)
+        {
+            // Inside a protected subtree — leave all styles untouched.
+        }
+        else if (depth <= 1)
         {
             ForceFullWidth(ve);
             if (depth == 0)
                 ve.style.height = new StyleLength(new Length(100f, LengthUnit.Percent));
+
+            // ModalDialog/GenericModalDialog are full-canvas overlay layers whose
+            // children are the actual dialog box — centered, fixed-width, must not
+            // be expanded. Force the slot to full width but stop here.
+            if (ve.name == "ModalDialog" || ve.name == "GenericModalDialog")
+                childrenSkip = true;
         }
         else
         {
@@ -193,7 +205,7 @@ public class PanelScaler : MonoBehaviour
         }
 
         for (int i = 0; i < ve.childCount; i++)
-            ExpandElement(ve[i], depth + 1, threshold);
+            ExpandElement(ve[i], depth + 1, threshold, childrenSkip);
     }
 
     // Returns true when the element's parent lays out children horizontally.
