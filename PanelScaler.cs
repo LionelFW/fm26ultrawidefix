@@ -37,7 +37,10 @@ public class PanelScaler : MonoBehaviour
         // Re-apply until confirmed; FM26 may revert resolution on scene transitions.
         if (!_resolutionApplied)
             ForceResolution();
+    }
 
+    void LateUpdate()
+    {
         // Camera.OnEnable is not patchable in IL2Cpp — poll instead.
         if (Plugin.PatchMatchCamera.Value)
             FixCameraAspects();
