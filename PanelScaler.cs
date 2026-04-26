@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using FM.Match;
+using Il2CppSystem.Linq;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UIElements;
@@ -173,6 +175,7 @@ public class PanelScaler : MonoBehaviour
 
     private static bool IsSkipped(string name)
     {
+        return false;
         if (name == null) return false;
         if (s_skipExact.Contains(name)) return true;
         foreach (var prefix in s_skipPrefixes)
@@ -210,6 +213,28 @@ public class PanelScaler : MonoBehaviour
         catch (Exception ex)
         {
             Plugin.Log.LogDebug($"[PanelScaler] ExpandUIDocumentRoots: {ex.Message}");
+        }
+
+        // Phase 1.5 — expand FigmaBaseCardTemplate popup children.
+        // These templates have USS-defined fixed widths (e.g. 992 px) on their direct children
+        // that the main ExpandElement pass misses because ParentIsRowFlex's geometric fallback
+        // returns true when the children all share layout.y == 0 (absolute-positioned layers).
+        if (docs != null)
+        {
+            try
+            {
+                foreach (var doc in docs)
+                {
+                    if (doc == null) continue;
+                    var root = doc.rootVisualElement;
+                    if (root == null) continue;
+                    ExpandCardTemplates(root, 0);
+                }
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogDebug($"[PanelScaler] ExpandCardTemplates: {ex.Message}");
+            }
         }
 
         // Phase 2 — grid tile scaling runs AFTER the expansion pass so that any maxWidth
@@ -306,6 +331,73 @@ public class PanelScaler : MonoBehaviour
             ExpandElement(ve[i], depth + 1, threshold, childrenSkip);
     }
 
+    // Expands FigmaBaseCardTemplate-style popup containers to fill ultrawide panels.
+    //
+    // The popup is a column-flex container with 3-4 children (Border, header, content,
+    // optional bottom buttons). When all of them carry width:100% AND their descendants
+    // do too, Yoga's percentage chain bottoms out at the deepest content's intrinsic
+    // size (e.g. 536 px on FMMenu's TitleHeader, 176 px on a smaller dialog) and
+    // propagates that back up. width:100% won't help — 100% of intrinsic-536 is 536.
+    //
+    // Fix: anchor the chain with an EXPLICIT PIXEL width on the template and its direct
+    // children. Descendants with USS width:100% then resolve against the explicit pixel
+    // anchor instead of intrinsic content. Do NOT recurse below direct children — that
+    // stretches inner content (title input bars, button rows, etc.).
+    //
+    // Detection: structural signature — any element with a direct child literally named
+    // "Border" and 2+ children total. Catches named templates (FigmaBaseCardTemplate-N)
+    // AND derived popups using unnamed wrappers (ClubFinancesCard, etc.). The depth-1
+    // Card slot has Title/Header/Body/Footer children (no Border) so it doesn't match.
+    private static void ExpandCardTemplates(VisualElement ve, int depth)
+    {
+        if (ve == null || depth > 50) return;
+
+        if (LooksLikeCardTemplate(ve))
+        {
+            float canvasW = (_lastHeightRatio > 0f)
+                ? Screen.width / _lastHeightRatio
+                : Screen.width;
+
+            ApplyExplicitWidth(ve, canvasW);
+
+            for (int i = 0; i < ve.childCount; i++)
+            {
+                var child = ve[i];
+                if (child != null) ApplyExplicitWidth(child, canvasW);
+            }
+            return; // Don't recurse — descendants keep their USS-natural sizes.
+        }
+
+        for (int i = 0; i < ve.childCount; i++)
+            ExpandCardTemplates(ve[i], depth + 1);
+    }
+
+    private static bool LooksLikeCardTemplate(VisualElement ve)
+    {
+        if (ve.childCount < 2) return false;
+        for (int i = 0; i < ve.childCount; i++)
+        {
+            var child = ve[i];
+            if (child != null && child.name == "Border") return true;
+        }
+        return false;
+    }
+
+    private static void ApplyExplicitWidth(VisualElement ve, float pixelWidth)
+    {
+        try
+        {
+            ve.style.paddingLeft  = new StyleLength(new Length(0f, LengthUnit.Pixel));
+            ve.style.paddingRight = new StyleLength(new Length(0f, LengthUnit.Pixel));
+            ve.style.marginLeft   = new StyleLength(new Length(0f, LengthUnit.Pixel));
+            ve.style.marginRight  = new StyleLength(new Length(0f, LengthUnit.Pixel));
+            ve.style.width        = new StyleLength(new Length(pixelWidth, LengthUnit.Pixel));
+            ve.style.maxWidth     = StyleKeyword.None;
+            ve.style.overflow     = Overflow.Visible;
+        }
+        catch { }
+    }
+
     private static void ScanForGridLayouts(VisualElement ve, int depth)
     {
         if (ve == null || depth > 35) return;
@@ -372,8 +464,8 @@ public class PanelScaler : MonoBehaviour
                     float baseW = s_tileOriginalWidths.TryGetValue(key, out float sw) ? sw : ws.value.value;
                     if (!s_tileOriginalWidths.ContainsKey(key)) s_tileOriginalWidths[key] = ws.value.value;
                     child.style.width = new StyleLength(new Length(baseW * ratio, LengthUnit.Pixel));
-                    Plugin.Log.LogDebug(
-                        $"[GridTile] '{child.name ?? "(null)"}' w={baseW:F0}→{baseW * ratio:F0} (×{ratio:F3})");
+                    // Plugin.Log.LogDebug(
+                    //     $"[GridTile] '{child.name ?? "(null)"}' w={baseW:F0}→{baseW * ratio:F0} (×{ratio:F3})");
                 }
 
                 // Scale inline pixel left position so absolutely-positioned tiles don't overlap.
@@ -397,6 +489,7 @@ public class PanelScaler : MonoBehaviour
     // popup panels to become unreadably narrow.
     private static bool ParentIsRowFlex(VisualElement ve)
     {
+        // 1. resolvedStyle — most accurate but throws via interface dispatch in IL2CPP.
         try
         {
             var p = ve.parent;
@@ -405,8 +498,8 @@ public class PanelScaler : MonoBehaviour
         }
         catch { }
 
-        // resolvedStyle is an interface and throws silently in IL2CPP.
-        // Fall back to the inline style, which is a plain struct and safe to read.
+        // 2. Inline style — plain struct, IL2CPP-safe, but only populated when the game
+        //    overrides USS with a C# inline assignment. Often not set.
         try
         {
             var p = ve.parent;
@@ -414,6 +507,26 @@ public class PanelScaler : MonoBehaviour
             var fd = p.style.flexDirection;
             if (fd.keyword == StyleKeyword.Undefined)
                 return fd.value == FlexDirection.Row;
+        }
+        catch { }
+
+        // 3. Geometric fallback — if any visible sibling shares the same Y position the
+        //    parent is laying out children horizontally regardless of how it declared that.
+        //    layout.y is a plain float field on a Rect struct, safe in IL2CPP.
+        try
+        {
+            var p = ve.parent;
+            if (p == null) return false;
+            float myY   = ve.layout.y;
+            long  myPtr = ve.Pointer.ToInt64();
+            for (int i = 0; i < p.childCount; i++)
+            {
+                var sib = p[i];
+                if (sib == null) continue;
+                if (sib.Pointer.ToInt64() == myPtr) continue;
+                if (sib.layout.width <= 1f) continue; // skip zero-size / hidden siblings
+                if (Math.Abs(sib.layout.y - myY) < 2f) return true;
+            }
         }
         catch { }
 
@@ -502,9 +615,10 @@ public class PanelScaler : MonoBehaviour
         if (ve == null || depth > maxDepth) return;
 
         string indent = new string(' ', depth * 2);
-        float rw = -1f, lw = -1f;
+        float rw = -1f, lw = -1f, lx = -1f;
         try { rw = ve.resolvedStyle.width; }  catch { }
         try { lw = ve.layout.width; }         catch { }
+        try { lx = ve.layout.x; }             catch { }
 
         var inlineW = "(none)";
         try
@@ -516,10 +630,71 @@ public class PanelScaler : MonoBehaviour
         }
         catch { }
 
+        float padL = -1f, padR = -1f;
+        try { padL = ve.resolvedStyle.paddingLeft;  } catch { }
+        try { padR = ve.resolvedStyle.paddingRight; } catch { }
+
+        string padStr = (padL > 0f || padR > 0f) ? $" pad={padL:F0}/{padR:F0}" : "";
+
+        string flexStr = "";
+        try
+        {
+            var fd = ve.resolvedStyle.flexDirection;
+            if (fd == FlexDirection.Row || fd == FlexDirection.RowReverse) flexStr = " flex=row";
+        }
+        catch { }
+
+        string posStr = "";
+        try
+        {
+            if (ve.resolvedStyle.position == Position.Absolute) posStr = " abs";
+        }
+        catch { }
+
+        string maxStr = "";
+        try
+        {
+            float mw = ve.resolvedStyle.maxWidth.value;
+            if (mw > 0f && mw < 9999f) maxStr = $" max={mw:F0}";
+        }
+        catch { }
+
+        string borderStr = "";
+        try
+        {
+            float bL = ve.resolvedStyle.borderLeftWidth;
+            float bR = ve.resolvedStyle.borderRightWidth;
+            if (bL > 0f || bR > 0f) borderStr = $" bord={bL:F0}/{bR:F0}";
+        }
+        catch { }
+
+        string alignStr = "";
+        try
+        {
+            var ai = ve.resolvedStyle.alignItems;
+            if (ai != Align.Stretch && ai != Align.Auto) alignStr = $" ai={ai}";
+        }
+        catch { }
+        try
+        {
+            var asf = ve.resolvedStyle.alignSelf;
+            if (asf != Align.Stretch && asf != Align.Auto) alignStr += $" as={asf}";
+        }
+        catch { }
+
+        string minStr = "";
+        try
+        {
+            float mnw = ve.resolvedStyle.minWidth.value;
+            if (mnw > 0f) minStr = $" min={mnw:F0}";
+        }
+        catch { }
+
         Plugin.Log.LogInfo(
             $"{indent}[{depth}] name={ve.name ?? "(null)"} " +
             $"children={ve.childCount} " +
-            $"resolved={rw:F0} layout={lw:F0} inline={inlineW}");
+            $"resolved={rw:F0} layout={lw:F0} x={lx:F0} inline={inlineW}" +
+            $"{padStr}{flexStr}{posStr}{maxStr}{borderStr}{alignStr}{minStr}");
 
         for (int i = 0; i < ve.childCount; i++)
             DumpVE(ve[i], depth + 1, maxDepth);
